@@ -3,7 +3,7 @@ module flip
 // flag is a flag parser. It returns the opposite of `default` when the flag exists.
 pub fn (mut f Flip) flag(label string, default bool, usage string) bool {
 	f.flag_metas__ << &FlagMeta{label, usage, default.str()}
-	exists, _ := parse_flag(label, f.args)
+	exists := parse_flag_classic(label, f.args)
 	p := if exists {
 		!default
 	} else {
@@ -76,6 +76,15 @@ fn (f Flip) get_arg_idx(s string) ?int {
 		}
 	}
 	return none
+}
+
+fn parse_flag_classic(s string, ss []string) bool {
+	for str in ss {
+		if str == s {
+			return true
+		}
+	}
+	return false
 }
 
 fn parse_flag(s string, ss []string) (bool, []string) {
