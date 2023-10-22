@@ -1,23 +1,26 @@
 module flip
 
-// bool is a flag parser. It parses arguments passed to flip and returns the boolean value of the flag.
-// Note: `bool` is unique to other parsers in this library.
-// If the user passes the flag as an argument but that flag has no value, it returns the opposite of `default`.
-pub fn (mut f Flip) bool(label string, default bool, usage string) bool {
+// flag is a flag parser. It returns the opposite of `default` when the flag exists.
+pub fn (mut f Flip) flag(label string, default bool, usage string) bool {
 	f.flag_metas__ << &FlagMeta{label, usage, default.str()}
-	exists, tail := parse_flag(label, f.args)
-	p := parse_bool(tail) or { !default && exists }
+	exists, _ := parse_flag(label, f.args)
+	p := if exists {
+		!default
+	} else {
+		default
+	}
 	f.flags << &Flag{label, p.str()}
 
 	if exists {
-		index := f.get_arg_idx('-' + label) or { return default }
-		if index < f.args.len - 1 && f.args[index + 1][0].ascii_str() != '-' {
-			f.args.delete(index + 1)
-		}
 		f.rem_arg('-' + label)
 		return p
 	}
 	return default
+}
+
+// bool is a flag parser. It parses arguments passed to flip and returns the boolean value of the flag.
+pub fn (mut f Flip) bool(label string, default bool, usage string) bool {
+	return f.impl_flag(label, default, usage, parse_bool)
 }
 
 // int is a flag parser. It parses arguments passed to flip and returns the integer value of the flag.
