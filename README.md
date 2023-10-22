@@ -1,6 +1,6 @@
 # Flip: A CLI Application Framework for V
 
-**Flip** is a simple library designed to facilitate the creation of command-line interface (CLI) applications in the V programming language. It simplifies the process of building CLI applications by providing a set of utilities for defining commands, flags, and subcommands.
+**Flip** is a simple library designed to help you with the creation of command-line interface (CLI) applications in the V programming language. It simplifies the process of building CLI applications by providing a set of utilities for defining commands, flags, and subcommands.
 
 ## Why Flip?
 
@@ -87,14 +87,14 @@ The value of "text" is "I like waffles"
 To begin using Flip in your projects, you can follow these steps:
 
 1. Install Flip as a module in your V project:
-```bash
-v install https://github.com/katekyy/flip
-```
+	```bash
+	v install https://github.com/katekyy/flip
+	```
 
-2. Import Flip and in your code:
-```v
-import flip
-```
+2. Import Flip in your code:
+	```v
+	import flip
+	```
 
 3. Define your CLI application using Flip's functionality.
 
@@ -106,6 +106,5 @@ We welcome contributions from the community! If you find issues or have ideas fo
 
 ---
 
-**Made with <3 by katekyy**</br>
-**MIT © 2023 katekyy**
+MIT © 2023 katekyy
 
