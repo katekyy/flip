@@ -229,9 +229,18 @@ pub fn (mut f Flip) parse() ! {
 			f.print_help()
 			return
 		}
+		if isnil(f.execute) {
+			return
+		}
 
-		if !isnil(f.execute) {
-			f.execute(f)!
+		f.execute(f) or {
+			if !isnil(f.error_handler) {
+				f.error_handler(err)!
+				return
+			}
+			eprintln(err)
+			exit(err.code())
+			return
 		}
 	}
 }
