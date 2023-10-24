@@ -265,9 +265,13 @@ pub fn (f Flip) args() ![]string {
 	return f.args
 }
 
-// flags returns a map of flags that were passed and flags that were not
-pub fn (f Flip) flags() map[string]string {
+// flags returns a map of all flags
+pub fn (f Flip) flags_map() map[string]string {
 	return f.mapped_flags
+}
+
+pub fn (f Flip) flags() []Flag {
+	return f.flags
 }
 
 fn (f Flip) print_flags() {
