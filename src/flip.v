@@ -6,7 +6,7 @@ import strings { repeat_string }
 
 type FnX = fn (Flip) !
 
-type FnE = fn (IError) !
+type FnE = fn (Flip, IError) !
 
 pub struct Padding {
 pub:
@@ -153,7 +153,7 @@ pub fn (mut f Flip) parse() ! {
 				eprintln(bold(red('Error: ')) + err.msg())
 				return
 			}
-			f.error_handler(err)!
+			f.error_handler(f, err)!
 			return
 		}
 		if !f.invoked && isnil(f.execute) {
@@ -165,7 +165,7 @@ pub fn (mut f Flip) parse() ! {
 		}
 		f.execute(f) or {
 			if !isnil(f.error_handler) {
-				f.error_handler(err)!
+				f.error_handler(f, err)!
 				return
 			}
 			eprintln(err)
@@ -184,7 +184,7 @@ fn (mut f Flip) exec_commands() !string {
 				sub.exec_commands() or {
 					if err.msg() != '!' {
 						if !isnil(sub.error_handler) {
-							sub.error_handler(err)!
+							sub.error_handler(sub, err)!
 							return error('!')
 						}
 						return err
