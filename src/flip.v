@@ -2,58 +2,11 @@ module flip
 
 import math { max }
 import term { bold, red }
+import strings { repeat_string }
 
 type FnX = fn (Flip) !
 
 type FnE = fn (IError) !
-
-struct Flag {
-pub mut:
-	label string
-	value string
-}
-
-// str returns the string version of flag
-pub fn (f Flag) str() string {
-	return '${f.label}: "${f.value}"'
-}
-
-fn (fs []Flag) get_by_meta(fm FlagMeta) ?Flag {
-	for f in fs {
-		if f.label == fm.label {
-			return f
-		}
-	}
-	return none
-}
-
-fn (mut fms []FlagMeta) remove(fm FlagMeta) ?FlagMeta {
-	mut flag_metas := []FlagMeta{}
-	mut flag_meta := FlagMeta{}
-
-	for glob in fms {
-		if fm.label == glob.label {
-			flag_meta = fm
-			continue
-		}
-
-		flag_metas << glob
-	}
-
-	fms = flag_metas.clone()
-
-	if flag_meta == FlagMeta{} {
-		println(flag_meta)
-		return none
-	}
-	return flag_meta
-}
-
-struct FlagMeta {
-	label   string
-	usage   string
-	default string
-}
 
 pub struct Padding {
 pub:
@@ -65,49 +18,66 @@ pub:
 
 pub struct Flip {
 pub mut:
-	subcommands []Flip
-	categories  map[string]string
-	category    string
-	flags       []Flag // Use flags() to get this field.
+	commands   []Flip
+	categories map[string]string
+	category   string
 pub:
 	name          string
 	alias         []string
 	description   string
 	takes_args    bool
 	execute       FnX = unsafe { nil }
-	error_handler FnE = unsafe { nil } // This is only invoked at the main Flip. Also, the subcommand errors are falling back into the main Flip.
+	error_handler FnE = unsafe { nil } // This is only invoked at the main Flip. Also, the command errors are falling back into the main Flip.
 
 	help_padding Padding = Padding{
 		left: 2
 		right: 10
 	}
 mut:
-	args                  []string // Use `args()` to get this field.
-	mapped_flags          map[string]string
-	invoked__             bool
-	flag_metas__          []FlagMeta
-	max_name_len__        int
-	initialized_with_help bool
+	args               []string // Use `args()` to get this field.
+	invoked            bool
+	flags              []Flag // Use flags() to get this field.
+	flag_parser        &FlagParser = unsafe { nil }
+	mapped_flags       map[string]string
+	help__max_name_len int
+	help__initialized  bool
 }
 
-// init initializes the given flip with a default help subcommand and passes the args to the flip.
-// Note: If you don't want a help subcommand then you can call `init_no_help()` function instead.
+// init initializes the given flip with a default help command and passes the args to the flip.
+// Note: If you don't want a help command then you can call `init_no_help()` function instead.
 pub fn (mut f Flip) init(args []string) {
-	f.impl_init(args, false, 1)
-	f.initialized_with_help = true
-	f.subcommands << &Flip{
+	f.impl_init(args, false, 0)
+	f.flag_parser = FlagParser.new(args)
+	f.help__initialized = true
+	f.commands << &Flip{
 		name: 'help'
 		description: 'Show help for this application.'
 		category: 'misc'
-		takes_args: false
+		takes_args: true
 		execute: fn (f Flip) ! {
 			f.help_helper(0)
 		}
 	}
 }
 
+fn (mut f Flip) impl_init(args []string, command bool, i int) {
+	f.args = args
+	if command {
+		f.args = args[args.len % i..]
+	}
+	if f.categories['misc'] == '' {
+		f.categories['misc'] = 'Miscellaneous'
+	}
+	for mut sub in f.commands {
+		if sub.category == '' {
+			sub.category = 'misc'
+		}
+		sub.impl_init(f.args, true, i + 1)
+	}
+}
+
 fn (f Flip) help_helper(prec int) {
-	if prec < f.args.len {
+	if prec + 1 <= f.args.len {
 		next_flip := f.get_sub(f.args[prec]) or {
 			f.print_help()
 			return
@@ -124,23 +94,6 @@ pub fn (mut f Flip) init_no_help(args []string) {
 	f.impl_init(args, false, 1)
 }
 
-fn (mut f Flip) impl_init(args []string, subcommand bool, i int) {
-	f.args = args
-	if subcommand {
-		f.args = args[i % args.len..]
-	}
-
-	if f.categories['misc'] == '' {
-		f.categories['misc'] = 'Miscellaneous'
-	}
-	for mut sub in f.subcommands {
-		if sub.category == '' {
-			sub.category = 'misc'
-		}
-		sub.impl_init(f.args, true, i + 1)
-	}
-}
-
 // print_help prints help for the flip
 pub fn (f Flip) print_help() {
 	mut buf := ''
@@ -148,11 +101,11 @@ pub fn (f Flip) print_help() {
 		buf += '${f.description}\n\n'
 	}
 	buf += 'Usage: ${f.name}'
-	cmd := if f.initialized_with_help { 1 } else { 0 }
-	if f.flag_metas__.len > 0 {
+	cmd := if f.help__initialized { 1 } else { 0 }
+	if f.visible_flags_count() > 0 {
 		buf += ' [flags]'
 	}
-	if f.subcommands.len > cmd {
+	if f.commands.len > cmd {
 		buf += ' [command]'
 	}
 	if f.takes_args {
@@ -161,61 +114,40 @@ pub fn (f Flip) print_help() {
 	buf += '\n\n'
 
 	print(buf)
-	f.print_subcommands()
+	f.print_commands()
 	f.print_flags()
 }
 
-fn (mut f Flip) clon_em() {
-	for global_meta in f.flag_metas__ {
-		usage := global_meta.usage.trim_space()
-		mut names := []string{}
-
-		if usage.len > 2 && usage[0].ascii_str() == '[' {
-			mut buf := ''
-			for i, character in usage[1..] {
-				ch := character.ascii_str()
-				if i - 1 == usage.len {
-					return
-				}
-				match ch {
-					']' { break }
-					' ' { continue }
-					',' { names << buf }
-					else {}
-				}
-				println(ch)
-				buf += ch
-			}
-		} else {
-			return
+fn (f Flip) visible_flags_count() int {
+	mut i := 0
+	for flag in f.flags {
+		if flag.private && f.name !in flag.private_for {
+			continue
 		}
-
-		for name in names {
-			for mut sub in f.subcommands {
-				if name == sub.name {
-					sub.flag_metas__ << FlagMeta{
-						label: global_meta.label
-						usage: usage.split(']')[1].trim_space()
-					}
-					sub.flags << f.flags.get_by_meta(global_meta) or { Flag{} }
-				}
-			}
-		}
-		f.flag_metas__.remove(global_meta)
+		i++
 	}
+	return i
 }
 
-// parse parses the subcommands from flip.args and then executes the first one that it encounters.
-// Note: The left arguments are reserved for subcommands and can be accessed inside of it.
+fn (mut f Flip) move_flags() {
+	for mut sub in f.commands {
+		sub.flags = f.flags
+	}
+	f.flag_parser = unsafe { nil }
+}
+
+// parse parses the commands from flip.args and then executes the first one that it encounters.
+// Note: The left arguments are reserved for commands and can be accessed inside of it.
 pub fn (mut f Flip) parse() ! {
-	f.clon_em()
+	f.flag_parser.join_arrays()
+	f.move_fields()
+	f.move_flags()
 	f.flags_to_map()
 	f.set_max_length()
-	for mut sub in f.subcommands {
+	for mut sub in f.commands {
 		sub.set_max_length()
 	}
-
-	f.exec_subcommands() or {
+	f.exec_commands() or {
 		if err.msg() != '!' {
 			if isnil(f.error_handler) {
 				eprintln(bold(red('Error: ')) + err.msg())
@@ -224,15 +156,13 @@ pub fn (mut f Flip) parse() ! {
 			f.error_handler(err)!
 			return
 		}
-
-		if !f.invoked__ && isnil(f.execute) {
+		if !f.invoked && isnil(f.execute) {
 			f.print_help()
 			return
 		}
 		if isnil(f.execute) {
 			return
 		}
-
 		f.execute(f) or {
 			if !isnil(f.error_handler) {
 				f.error_handler(err)!
@@ -245,19 +175,23 @@ pub fn (mut f Flip) parse() ! {
 	}
 }
 
-fn (mut f Flip) exec_subcommands() !string {
+fn (mut f Flip) exec_commands() !string {
 	args := f.args
 	for arg in args {
-		for mut sub in f.subcommands {
+		for mut sub in f.commands {
 			if sub.name == arg || arg in sub.alias {
-				f.invoked__ = true
-				sub.exec_subcommands() or {
+				f.invoked = true
+				sub.exec_commands() or {
 					if err.msg() != '!' {
+						if !isnil(sub.error_handler) {
+							sub.error_handler(err)!
+							return error('!')
+						}
 						return err
 					}
 					f.rem_arg(arg)
 					if isnil(sub.execute) {
-						return error('The `execute` field is nil!\nGiven subcommand is not implemented yet. Or it is broken!')
+						return error('The `execute` field is nil!\nGiven command is not implemented yet. Or it is broken!')
 					}
 					sub.execute(f)!
 					return arg
@@ -268,39 +202,48 @@ fn (mut f Flip) exec_subcommands() !string {
 	return error('!')
 }
 
-// exec_subcommand executes a subcommand thats name is `name`.
-// Note: You can also run nested subcommands with this syntax: `sub1:sub2:sub3`
-pub fn (f Flip) exec_subcommand(name string) ! {
+// exec_command executes a command thats name is `name`.
+// Note: You can also run nested commands with this syntax: `sub1:sub2:sub3`
+pub fn (f Flip) exec_command(name string) ! {
 	names := name.split(':')
 	is_nested := names.len > 1
-	dump(names)
-	for sub in f.subcommands {
+	for sub in f.commands {
 		if sub.name == names[0] {
 			if is_nested {
-				sub.exec_subcommand(names[names.len - 1..].join(':'))!
+				sub.exec_command(names[names.len - 1..].join(':'))!
 			}
 			if isnil(sub.execute) {
-				return error('The `execute` field is nil!\nGiven subcommand is not implemented yet. Or it is broken!')
+				return error('The `execute` field is nil!\nGiven command is not implemented yet. Or it is broken!')
 			}
 			sub.execute(f)!
 			return
 		}
 	}
-	return error('Could not find subcommand "${names[0]}".')
+	return error('Could not find command "${names[0]}".')
 }
 
-// add_global_category adds a category for all subcommands defined in the flip
+fn (mut f Flip) rem_arg(s string) {
+	mut buf := []string{}
+	for arg in f.args {
+		if arg != s {
+			buf << arg
+		}
+	}
+	f.args = buf
+}
+
+// add_global_category adds a category for all commands defined in the flip
 pub fn (mut f Flip) add_global_category(key string, title string) {
 	f.categories[key] = title
-	for mut sub in f.subcommands {
+	for mut sub in f.commands {
 		sub.add_global_category(key, title)
 	}
 }
 
-// set_global_category adds an already existing category for all subcommands defined in the flip
+// set_global_category adds an already existing category for all commands defined in the flip
 pub fn (mut f Flip) set_global_category(key string) {
 	title := f.categories[key]
-	for mut sub in f.subcommands {
+	for mut sub in f.commands {
 		sub.categories[key] = title
 		sub.set_global_category(key)
 	}
@@ -310,11 +253,6 @@ fn (mut f Flip) flags_to_map() {
 	mut mapped_flags := map[string]string{}
 	for flag in f.flags {
 		mapped_flags[flag.label] = flag.value
-	}
-	for flag_meta in f.flag_metas__ {
-		if flag_meta.label !in mapped_flags {
-			mapped_flags[flag_meta.label] = flag_meta.default
-		}
 	}
 	f.mapped_flags = mapped_flags.move()
 }
@@ -334,16 +272,12 @@ pub fn (f Flip) flags() map[string]string {
 
 fn (f Flip) print_flags() {
 	mut buf := ''
-	flags := f.flag_metas__
-
-	mut flag_names := []string{}
-	for flag in flags {
-		flag_names << flag.label
-	}
-
-	if flags.len != 0 {
+	if f.visible_flags_count() != 0 {
 		buf += 'Flags:\n'
-		for flag in flags {
+		for flag in f.flags {
+			if flag.private && f.name !in flag.private_for {
+				continue
+			}
 			buf += flag.parse_info(f) + '\n'
 		}
 		buf += '\n'
@@ -351,28 +285,28 @@ fn (f Flip) print_flags() {
 	print(buf)
 }
 
-fn (f Flip) print_subcommands() {
+fn (f Flip) print_commands() {
 	mut buf := ''
-	subs := f.subcommands
+	subs := f.commands
 
 	mut sub_names := []string{}
 	for sub in subs {
 		sub_names << sub.name
 	}
 
-	mut strings := map[string][]string{}
+	mut ss := map[string][]string{}
 
 	for sub in subs {
-		strings[sub.category] << sub.parse_info(f)
+		ss[sub.category] << sub.parse_info(f)
 	}
 
 	for cat, title in f.categories {
-		if !f.subcommands.category_used(cat) {
+		if !f.commands.category_used(cat) {
 			continue
 		}
 
 		buf += '* ${title}:\n'
-		for s in strings[cat] {
+		for s in ss[cat] {
 			buf += '${s}\n'
 		}
 		buf += '\n'
@@ -380,18 +314,18 @@ fn (f Flip) print_subcommands() {
 	print(buf)
 }
 
-fn (meta FlagMeta) parse_info(f Flip) string {
+fn (flag Flag) parse_info(f Flip) string {
 	padding := f.help_padding
-	mut str := '${get_spaces(padding.left)}-${meta.label}'
+	mut str := '${get_spaces(padding.left)}-${flag.label}'
 
-	usage := meta.usage.split('\n')
+	usage := flag.description.split('\n')
 	for i, line in usage {
 		if i != 0 {
-			str += '\n${get_spaces(padding.left + meta.label.len +
-				f.max_name_len__ - meta.label.len + padding.right)}${line}'
+			str += '\n${get_spaces(padding.left + flag.label.len +
+				f.help__max_name_len - flag.label.len + padding.right)}${line}'
 			continue
 		}
-		str += '${get_spaces(f.max_name_len__ - meta.label.len + padding.right - 1)}${line}'
+		str += '${get_spaces(f.help__max_name_len - flag.label.len + padding.right - 1)}${line}'
 	}
 
 	return str
@@ -411,10 +345,10 @@ fn (sub Flip) parse_info(f Flip) string {
 	desc := sub.description.split('\n')
 	for i, line in desc {
 		if i != 0 {
-			str += '\n${get_spaces(padding.left + f.max_name_len__ + padding.right)}${line}'
+			str += '\n${get_spaces(padding.left + f.help__max_name_len + padding.right)}${line}'
 			continue
 		}
-		str += '${get_spaces(f.max_name_len__ - label_len + padding.right)}${line}'
+		str += '${get_spaces(f.help__max_name_len - label_len + padding.right)}${line}'
 	}
 	return str
 }
@@ -428,32 +362,16 @@ fn (flips []Flip) category_used(s string) bool {
 	return false
 }
 
-fn get_spaces(i int) string {
-	mut s := ''
-	for _ in 0 .. i {
-		s += ' '
-	}
-	return s
-}
-
-fn get_char(i int, ch string) string {
-	mut s := ''
-	for _ in 0 .. i {
-		s += ch
-	}
-	return s
-}
-
 fn (f Flip) get_sub_names() []string {
 	mut buf := []string{}
-	for sub in f.subcommands {
+	for sub in f.commands {
 		buf << sub.name
 	}
 	return buf
 }
 
 fn (f Flip) get_sub(name string) ?Flip {
-	for sub in f.subcommands {
+	for sub in f.commands {
 		if sub.name == name || name in sub.alias {
 			return sub
 		}
@@ -465,8 +383,8 @@ fn (mut f Flip) set_max_length() {
 	mut flag_names := []string{}
 	mut sub_names := []string{}
 
-	flags := f.flag_metas__
-	subs := f.subcommands
+	flags := f.flags
+	subs := f.commands
 
 	for flag in flags {
 		flag_names << flag.label
@@ -487,7 +405,7 @@ fn (mut f Flip) set_max_length() {
 	a := get_max_length(flag_names)
 	b := get_max_length(sub_names)
 
-	f.max_name_len__ = max(a, b)
+	f.help__max_name_len = max(a, b)
 }
 
 fn get_max_length(ss []string) int {
@@ -508,4 +426,8 @@ fn max_from_array(i []int, j int) int {
 		}
 	}
 	return big
+}
+
+fn get_spaces(i int) string {
+	return repeat_string(' ', i)
 }
