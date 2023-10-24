@@ -1,4 +1,4 @@
-# Flip: A CLI Application Framework for V
+# Flip: A CLI Application Library for V
 
 **Flip** is a simple library designed to help you with the creation of command-line interface (CLI) applications in the V programming language. It simplifies the process of building CLI applications by providing a set of utilities for defining commands, flags, and subcommands.
 
@@ -56,16 +56,16 @@ fn main() {
 		name: 'test'
 		execute: fn (f flip.Flip) ! {
 			for flag in f.flags {
-                println(flag)
-            }
+				println(flag)
+			}
 			println('\nThe value of "text" is "${f.flags()['text']}"')
 		}
 	}
 	app.init(os.args)
-    app.bool('checkerboard', false, 'Show table as a checkerboard')
-    app.string('text', 'default value', 'Some string')
-    app.float('floating-point', .0, 'Some float')
-    app.int('integer', 0, 'Some integer')
+	app.bool('checkerboard', false, 'Show table as a checkerboard')
+	app.string('text', 'default value', 'Some string')
+	app.float('floating-point', .0, 'Some float')
+	app.int('integer', 0, 'Some integer')
 	app.parse()!
 }
 ```
@@ -86,12 +86,12 @@ The value of "text" is "I like waffles"
 
 To begin using Flip in your projects, you can follow these steps:
 
-1. Install Flip as a module in your V project:
+1. Install Flip in your V project:
 	```bash
 	v install https://github.com/katekyy/flip
 	```
 
-2. Import Flip in your code:
+2. Import Flip into your code:
 	```v
 	import flip
 	```
