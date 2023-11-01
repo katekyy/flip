@@ -5,11 +5,13 @@ import strings { repeat_string }
 pub struct Flag {
 pub mut:
 	label       string
-	value       string
+	short       ?rune
 	description string
+mut:
+	value       string
 	private_for []string
 	private     bool
-	public      bool
+	found       bool
 }
 
 // str returns the string version of flag
@@ -19,48 +21,47 @@ pub fn (f Flag) str() string {
 
 // new returns a pointer to a newely created flag
 [direct_array_access]
-pub fn Flag.new(label string, value ?string, description string) &Flag {
+pub fn Flag.new(label string, short ?rune, value ?string, description string) &Flag {
 	mut desc := description.trim_space()
 	mut private_for := []string{}
 	mut private := false
-	mut public := true
 
 	if desc.len > 2 && desc[0].ascii_str() == '[' {
 		idx := desc.index(']') or { -1 }
 		if idx > 0 {
 			private_for = desc[1..idx].split(',').map(it.trim_space())
-			private, public = true, false
+			private = true
 			desc = desc[idx + 1..].trim_space()
 		}
 	}
 	return &Flag{
 		label: label
+		short: short
 		value: value or { '' }
 		description: desc
 		private_for: private_for
 		private: private
-		public: public
 	}
 }
 
 // bool looks for a flag in arguments. If it finds one, it'll return it's value.
 // Note: Boolean type flags do not need to see the value of them.
 // If it finds only the flag without it's value, it'll return the opposite of `default`
-pub fn (mut f Flip) bool(label string, default bool, description string) bool {
-	return f.flag_parser.parse_bool(label, default, description)
+pub fn (mut f Flip) bool(label string, short ?rune, default bool, description string) bool {
+	return f.flag_parser.parse_bool(label, short, default, description)
 }
 
 // string looks for a flag in arguments. If it finds one, it'll return it's value.
-pub fn (mut f Flip) string(label string, default string, description string) string {
-	return f.flag_parser.parse_value(label, default, description, fn (s string) ?string {
+pub fn (mut f Flip) string(label string, short ?rune, default string, description string) string {
+	return f.flag_parser.parse_value(label, short, default, description, fn (s string) ?string {
 		return s
 	})
 }
 
 // int looks for a flag in arguments. If it finds one, it'll return it's value.
 // If it can't cast that value to an integer (int), it'll return `default`.
-pub fn (mut f Flip) int(label string, default int, description string) int {
-	return f.flag_parser.parse_value(label, default, description, fn (s string) ?int {
+pub fn (mut f Flip) int(label string, short ?rune, default int, description string) int {
+	return f.flag_parser.parse_value(label, short, default, description, fn (s string) ?int {
 		if is_int(s) {
 			return s.int()
 		}
@@ -70,8 +71,8 @@ pub fn (mut f Flip) int(label string, default int, description string) int {
 
 // float looks for a flag in arguments. If it finds one, it'll return it's value.
 // If it can't cast that value to an float (f64), it'll return `default`.
-pub fn (mut f Flip) float(label string, default f64, description string) f64 {
-	return f.flag_parser.parse_value(label, default, description, fn (s string) ?f64 {
+pub fn (mut f Flip) float(label string, short ?rune, default f64, description string) f64 {
+	return f.flag_parser.parse_value(label, short, default, description, fn (s string) ?f64 {
 		if is_float(s) {
 			return s.f64()
 		}
@@ -126,19 +127,18 @@ fn (mut f Flip) move_fields() {
 
 // parse_bool is the base function for `bool`.
 [direct_array_access]
-pub fn (mut p FlagParser) parse_bool(label string, default bool, description string) bool {
+pub fn (mut p FlagParser) parse_bool(label string, sh ?rune, default bool, description string) bool {
 	args := p.before_dashdash
 
 	mut val := default
-	longhand := '--${label}'
-	shorthand := '-${label}'
+	mut names := ['--${label}', '-${label}']
+	if sh != none {
+		names << ['--${sh.str()}', '-${sh.str()}']
+	}
 
 	for idx, arg in args {
-		long := arg.starts_with(longhand)
-		short := arg.starts_with(shorthand)
-
-		if long || short {
-			hand_len := if long { longhand.len } else { shorthand.len }
+		hand_len := get_len(arg, names)
+		if hand_len > 0 {
 			if arg.len == hand_len {
 				val_idx := idx + 1
 				if args.len >= val_idx + 1 && !(args[val_idx].starts_with('-')
@@ -164,26 +164,52 @@ pub fn (mut p FlagParser) parse_bool(label string, default bool, description str
 				break
 			}
 		}
+		// TODO:
+		// dash_len := get_len(arg, ['-', '--'])
+		// dump(dash_len)
+		// if dash_len > 0 {
+		// 	for ridx, r in arg.runes() {
+		// 		if r == sh or { break } {
+		// 			dump(label)
+		// 			uw_short := sh or { break }
+		// 			p.before_dashdash = []string{}
+		// 			// // dump(p.before_dashdash)
+		// 			// // p.before_dashdash << args
+		// 			// dump(p.before_dashdash)
+		// 			// p.before_dashdash << args[idx][..ridx]
+		// 			// dump(p.before_dashdash)
+		// 			// p.before_dashdash << args[idx][ridx..ridx + dash_len]
+		// 			tail := args[idx][dash_len..].split('').filter(|x| x != uw_short.str()).map(|x| '-${x}')
+		// 			// dump(label)
+		// 			if tail.len > 0 {
+		// 				p.before_dashdash << tail
+		// 				p.before_dashdash << args[..idx]
+		// 			}
+		// 			dump(p.before_dashdash)
+		// 			val = !default
+		// 			break
+		// 		}
+		// 	}
+		// }
 	}
-	p.flags << Flag.new(label, val.str(), description)
+	p.flags << Flag.new(label, sh, val.str(), description)
 	return val
 }
 
 // parse_value is the base function for `string`, `int` and `float`.
 [direct_array_access]
-pub fn (mut p FlagParser) parse_value[T](label string, default T, description string, from_str fn (string) ?T) T {
+pub fn (mut p FlagParser) parse_value[T](label string, sh ?rune, default T, description string, from_str fn (string) ?T) T {
 	args := p.before_dashdash
 
 	mut val := default
-	longhand := '--${label}'
-	shorthand := '-${label}'
+	mut names := ['--${label}', '-${label}']
+	if sh != none {
+		names << ['--${sh.str()}', '-${sh.str()}']
+	}
 
 	for idx, arg in args {
-		long := arg.starts_with(longhand)
-		short := arg.starts_with(shorthand)
-
-		if long || short {
-			hand_len := if long { longhand.len } else { shorthand.len }
+		hand_len := get_len(arg, names)
+		if hand_len > 0 {
 			if arg.len == hand_len {
 				val_idx := idx + 1
 				if args.len >= val_idx + 1 && !(args[val_idx].starts_with('-')
@@ -203,8 +229,26 @@ pub fn (mut p FlagParser) parse_value[T](label string, default T, description st
 			}
 		}
 	}
-	p.flags << Flag.new(label, val.str(), description)
+	p.flags << Flag.new(label, sh, val.str(), description)
 	return val
+}
+
+fn starts_with(s string, vals []string) bool {
+	mut b := false
+	for val in vals {
+		b = s.starts_with(val)
+	}
+	return b
+}
+
+fn get_len(s string, vals []string) int {
+	mut len := -1
+	for val in vals {
+		if s.starts_with(val) {
+			len = val.len
+		}
+	}
+	return len
 }
 
 fn (mut p FlagParser) clear_args_at(idxs []int) {
