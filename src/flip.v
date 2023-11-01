@@ -24,6 +24,7 @@ pub mut:
 pub:
 	name          string
 	alias         []string
+	usage         string
 	description   string
 	takes_args    bool
 	execute       FnX = unsafe { nil }
@@ -97,22 +98,27 @@ pub fn (mut f Flip) init_no_help(args []string) {
 // print_help prints help for the flip
 pub fn (f Flip) print_help() {
 	mut buf := ''
-	if f.description != '' {
+	if !f.description.is_blank() {
 		buf += '${f.description}\n\n'
 	}
 	buf += 'Usage: ${f.name}'
-	cmd := if f.help__initialized { 1 } else { 0 }
-	if f.visible_flags_count() > 0 {
-		buf += ' [flags]'
+	if f.usage.is_blank() {
+		cmd := if f.help__initialized { 1 } else { 0 }
+		if f.visible_flags_count() > 0 {
+			buf += ' [flags]'
+		}
+		if f.commands.len > cmd {
+			buf += ' [command]'
+		}
+		if f.takes_args {
+			buf += ' [arguments] ...'
+		}
 	}
-	if f.commands.len > cmd {
-		buf += ' [command]'
-	}
-	if f.takes_args {
-		buf += ' [arguments] ...'
+	if !f.usage.is_blank() {
+		usg := 'Usage: '
+		buf += ' ' + f.usage.split('\n').join('\n${get_spaces(usg.len)}')
 	}
 	buf += '\n\n'
-
 	print(buf)
 	f.print_commands()
 	f.print_flags()
@@ -182,18 +188,14 @@ fn (mut f Flip) exec_commands() !string {
 			if sub.name == arg || arg in sub.alias {
 				f.invoked = true
 				sub.exec_commands() or {
-					if err.msg() != '!' {
-						if !isnil(sub.error_handler) {
-							sub.error_handler(sub, err)!
-							return error('!')
-						}
-						return err
-					}
 					f.rem_arg(arg)
 					if isnil(sub.execute) {
 						return error('The `execute` field is nil!\nGiven command is not implemented yet. Or it is broken!')
 					}
-					sub.execute(f)!
+					sub.execute(f) or {
+						sub.error_handler(sub, err)!
+						return error('!')
+					}
 					return arg
 				}
 			}
