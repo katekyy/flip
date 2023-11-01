@@ -1,7 +1,7 @@
 module flip
 
 import math { max }
-import term { bold, red }
+import term
 import strings { repeat_string }
 
 type FnX = fn (Flip) !
@@ -28,7 +28,11 @@ pub:
 	description   string
 	takes_args    bool
 	execute       FnX = unsafe { nil }
-	error_handler FnE = unsafe { nil } // This is only invoked at the main Flip. Also, the command errors are falling back into the main Flip.
+	error_handler FnE = fn (f Flip, err IError) ! {
+		eprintln(term.bg_red('Error:') + ' ' + err.msg())
+		f.print_help()
+		exit(err.code())
+	}
 
 	help_padding Padding = Padding{
 		left: 2
@@ -155,10 +159,6 @@ pub fn (mut f Flip) parse() ! {
 	}
 	f.exec_commands() or {
 		if err.msg() != '!' {
-			if isnil(f.error_handler) {
-				eprintln(bold(red('Error: ')) + err.msg())
-				return
-			}
 			f.error_handler(f, err)!
 			return
 		}
@@ -194,7 +194,7 @@ fn (mut f Flip) exec_commands() !string {
 					}
 					sub.execute(f) or {
 						sub.error_handler(sub, err)!
-						return error('!')
+						return err
 					}
 					return arg
 				}
