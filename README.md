@@ -62,10 +62,10 @@ fn main() {
 		}
 	}
 	app.init(os.args)
-	app.bool('checkerboard', false, 'Show table as a checkerboard')
-	app.string('text', 'default value', 'Some string')
-	app.float('floating-point', .0, 'Some float')
-	app.int('integer', 0, 'Some integer')
+	app.bool('checkerboard', none, false, 'Show table as a checkerboard')
+	app.string('text', none, 'default value', 'Some string')
+	app.float('floating-point', none, .0, 'Some float')
+	app.int('integer', none, 0, 'Some integer')
 	app.parse()!
 }
 ```
