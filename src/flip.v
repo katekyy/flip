@@ -52,7 +52,6 @@ mut:
 // Note: If you don't want a help command then you can call `init_no_help()` function instead.
 pub fn (mut f Flip) init(args []string) {
 	f.impl_init(args, false, 0)
-	f.flag_parser = FlagParser.new(args)
 	f.help__initialized = true
 	f.commands << &Flip{
 		name: 'help'
@@ -66,6 +65,8 @@ pub fn (mut f Flip) init(args []string) {
 }
 
 fn (mut f Flip) impl_init(args []string, command bool, i int) {
+	f.commands = f.commands.filter(!it.name.is_blank())
+	f.flag_parser = FlagParser.new(args)
 	f.args = args
 	if command {
 		f.args = args[args.len % i..]
@@ -87,7 +88,6 @@ fn (f Flip) help_helper(prec int) {
 			f.print_help()
 			return
 		}
-
 		next_flip.help_helper(prec + 1)
 	} else {
 		f.print_help()
@@ -139,19 +139,11 @@ fn (f Flip) visible_flags_count() int {
 	return i
 }
 
-fn (mut f Flip) move_flags() {
-	for mut sub in f.commands {
-		sub.flags = f.flags
-	}
-	f.flag_parser = unsafe { nil }
-}
-
 // parse parses the commands from flip.args and then executes the first one that it encounters.
 // Note: The left arguments are reserved for commands and can be accessed inside of it.
 pub fn (mut f Flip) parse() ! {
 	f.flag_parser.join_arrays()
-	f.move_fields()
-	f.move_flags()
+	f.push_fields()
 	f.flags_to_map()
 	f.set_max_length()
 	for mut sub in f.commands {
@@ -162,7 +154,7 @@ pub fn (mut f Flip) parse() ! {
 			f.error_handler(f, err)!
 			return
 		}
-		if !f.invoked && isnil(f.execute) {
+		if !f.invoked && isnil(f.execute) && f.help__initialized {
 			f.print_help()
 			return
 		}
@@ -278,7 +270,7 @@ pub fn (f Flip) flags() []Flag {
 
 fn (f Flip) print_flags() {
 	mut buf := ''
-	if f.visible_flags_count() != 0 {
+	if f.visible_flags_count() > 0 {
 		buf += 'Flags:\n'
 		for flag in f.flags {
 			if flag.private && f.name !in flag.private_for {
@@ -294,23 +286,18 @@ fn (f Flip) print_flags() {
 fn (f Flip) print_commands() {
 	mut buf := ''
 	subs := f.commands
-
 	mut sub_names := []string{}
 	for sub in subs {
 		sub_names << sub.name
 	}
-
 	mut ss := map[string][]string{}
-
 	for sub in subs {
 		ss[sub.category] << sub.parse_info(f)
 	}
-
 	for cat, title in f.categories {
 		if !f.commands.category_used(cat) {
 			continue
 		}
-
 		buf += '* ${title}:\n'
 		for s in ss[cat] {
 			buf += '${s}\n'
@@ -323,7 +310,6 @@ fn (f Flip) print_commands() {
 fn (flag Flag) parse_info(f Flip) string {
 	padding := f.help_padding
 	mut str := '${get_spaces(padding.left)}-${flag.label}'
-
 	usage := flag.description.split('\n')
 	for i, line in usage {
 		if i != 0 {
@@ -333,7 +319,6 @@ fn (flag Flag) parse_info(f Flip) string {
 		}
 		str += '${get_spaces(f.help__max_name_len - flag.label.len + padding.right - 1)}${line}'
 	}
-
 	return str
 }
 
@@ -341,13 +326,11 @@ fn (sub Flip) parse_info(f Flip) string {
 	padding := f.help_padding
 	label := if sub.alias.len > 0 { sub.name + ', ' + sub.alias.join(', ') } else { sub.name }
 	mut label_len := label.len
-
 	mut str := '${get_spaces(padding.left)}${label}'
 	if sub.takes_args {
 		str = '${get_spaces(padding.left)}${label} ...'
 		label_len += 4
 	}
-
 	desc := sub.description.split('\n')
 	for i, line in desc {
 		if i != 0 {
@@ -388,14 +371,11 @@ fn (f Flip) get_sub(name string) ?Flip {
 fn (mut f Flip) set_max_length() {
 	mut flag_names := []string{}
 	mut sub_names := []string{}
-
 	flags := f.flags
 	subs := f.commands
-
 	for flag in flags {
 		flag_names << flag.label
 	}
-
 	for sub in subs {
 		if sub.takes_args {
 			sub_names << '${sub.name} ...'
@@ -407,20 +387,16 @@ fn (mut f Flip) set_max_length() {
 		}
 		sub_names << sub.name
 	}
-
 	a := get_max_length(flag_names)
 	b := get_max_length(sub_names)
-
 	f.help__max_name_len = max(a, b)
 }
 
 fn get_max_length(ss []string) int {
 	mut lens := []int{}
-
 	for s in ss {
 		lens << s.len
 	}
-
 	return max_from_array(lens, 0)
 }
 

@@ -20,12 +20,10 @@ pub fn (f Flag) str() string {
 }
 
 // new returns a pointer to a newely created flag
-[direct_array_access]
 pub fn Flag.new(label string, short ?rune, value ?string, description string) &Flag {
 	mut desc := description.trim_space()
 	mut private_for := []string{}
 	mut private := false
-
 	if desc.len > 2 && desc[0].ascii_str() == '[' {
 		idx := desc.index(']') or { -1 }
 		if idx > 0 {
@@ -97,7 +95,7 @@ pub fn FlagParser.new(args []string) &FlagParser {
 	return p
 }
 
-[direct_array_access]
+@[direct_array_access]
 fn (mut p FlagParser) split_arrays() {
 	p.before_dashdash = p.args
 	idx := p.args.index('--')
@@ -120,22 +118,21 @@ fn (mut p FlagParser) join_arrays() {
 	p.args = buf
 }
 
-fn (mut f Flip) move_fields() {
-	f.args = f.flag_parser.args
-	f.flags = f.flag_parser.flags.map(|flag| *flag)
+fn (mut f Flip) push_fields() {
+	f.args << f.flag_parser.args
+	f.flags << f.flag_parser.flags.map(|flag| *flag)
+	f.flag_parser = unsafe { nil }
 }
 
 // parse_bool is the base function for `bool`.
-[direct_array_access]
+@[direct_array_access]
 pub fn (mut p FlagParser) parse_bool(label string, sh ?rune, default bool, description string) bool {
 	args := p.before_dashdash
-
 	mut val := default
 	mut names := ['--${label}', '-${label}']
 	if sh != none {
 		names << ['--${sh.str()}', '-${sh.str()}']
 	}
-
 	for idx, arg in args {
 		hand_len := get_len(arg, names)
 		if hand_len > 0 {
@@ -197,16 +194,14 @@ pub fn (mut p FlagParser) parse_bool(label string, sh ?rune, default bool, descr
 }
 
 // parse_value is the base function for `string`, `int` and `float`.
-[direct_array_access]
+@[direct_array_access]
 pub fn (mut p FlagParser) parse_value[T](label string, sh ?rune, default T, description string, from_str fn (string) ?T) T {
 	args := p.before_dashdash
-
 	mut val := default
 	mut names := ['--${label}', '-${label}']
 	if sh != none {
 		names << ['--${sh.str()}', '-${sh.str()}']
 	}
-
 	for idx, arg in args {
 		hand_len := get_len(arg, names)
 		if hand_len > 0 {
@@ -280,7 +275,7 @@ fn is_int(s string) bool {
 	return s.int() != 0
 }
 
-[inline]
+@[inline]
 fn is_bool(s string) bool {
 	sl := s.to_lower()
 	return sl == 'false' || sl == 'true'
