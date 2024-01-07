@@ -1,415 +1,211 @@
 module flip
 
-import math { max }
 import term
-import strings { repeat_string }
+import os
 
-type FnX = fn (Flip) !
+// V fmt is weird? error: parameter name must not begin with upper case letter (`IError`)
+// pub type FlipFunction     = fn (Flip, []string) !
+// pub type FlipErrorHandler = fn (Flip, IError) !
 
-type FnE = fn (Flip, IError) !
-
-pub struct Padding {
-pub:
-	left   int
-	right  int
-	top    int
-	bottom int
-}
-
+@[heap; params]
 pub struct Flip {
-pub mut:
-	commands   []Flip
-	categories map[string]string
-	category   string
-pub:
-	name          string
-	alias         []string
-	usage         string
-	description   string
-	takes_args    bool
-	execute       FnX = unsafe { nil }
-	error_handler FnE = fn (f Flip, err IError) ! {
-		eprintln(term.bg_red('Error:') + ' ' + err.msg())
-		f.print_help()
-		exit(err.code())
-	}
-
-	help_padding Padding = Padding{
-		left: 2
-		right: 10
-	}
+	docs    Docs
+	is_root bool
 mut:
-	args               []string // Use `args()` to get this field.
-	invoked            bool
-	flags              []Flag // Use flags() to get this field.
-	flag_parser        &FlagParser = unsafe { nil }
-	mapped_flags       map[string]string
-	help__max_name_len int
-	help__initialized  bool
+	categories  map[string]string
+	parent      &Flip = unsafe { nil }
+	args        []string
+	flag_parser &FlagParser = new_flag_parser()
+pub:
+	execute       fn (Flip, []string) ! = unsafe { nil }
+	error_handler fn (Flip, IError) !   = fn (f Flip, e IError) ! {
+		eprintln(term.bold(term.red('error:')) + ' ${e.msg()}')
+		eprintln('run ' + term.bold(f.name + ' help') + ' for usage')
+		exit(1)
+	}
+	// If true, copies arguments including the first element
+	include_prog_name bool
+	// Removes the default help command
+	disable_help bool
+	// Doesn't look for flags in the args
+	disable_flags bool
+	// If next command was not found, runs the current one with arguments as the unknown command path
+	no_unknown_cmds bool
+	// Skips searching for the next command in the command path (arguments)
+	force_skip_cmds bool
+	// Show in help that the command takes options
+	takes_flags bool
+	// Set custom usage in help
+	custom_usage ?string
+pub mut:
+	name        string
+	category    string
+	description string
+	commands    []&Flip
 }
 
-// init initializes the given flip with a default help command and passes the args to the flip.
-// Note: If you don't want a help command then you can call `init_no_help()` function instead.
+// new_app returns a new app
+pub fn new_app(opts Flip) &Flip {
+	return &Flip{
+		...opts
+		is_root: true
+	}
+}
+
+// new_command returns a new command
+pub fn new_command(opts Flip) &Flip {
+	if opts.name.is_blank() {
+		panic('name of a command cannot be blank')
+	}
+	return &Flip{
+		...opts
+	}
+}
+
+// init initializes the app created with `new_app`
 pub fn (mut f Flip) init(args []string) {
-	f.impl_init(args, false, 0)
-	f.help__initialized = true
-	f.commands << &Flip{
-		name: 'help'
-		description: 'Show help for this application.'
-		category: 'misc'
-		takes_args: true
-		execute: fn (f Flip) ! {
-			f.help_helper(0)
+	if !f.is_root {
+		panic('you cannot initialize a command (Flip.init() called on a non root Flip)')
+	}
+	if args.len < 1 {
+		return
+	}
+	if f.name.is_blank() {
+		f.name = os.file_name(args[0]).all_before_last('.')
+		if f.name.len < 1 {
+			panic('please specify the app name')
 		}
+	}
+	f.args = if f.include_prog_name { args } else { args[1..] }
+	if !f.disable_help {
+		f.commands << new_command(
+			name: 'help'
+			description: 'Show help for this application.'
+			force_skip_cmds: true
+			execute: fn (f Flip, args []string) ! {
+				f.find_command(args[1..])!.show_help()
+			}
+		)
+	}
+	f.connect_children_to_parent()
+}
+
+fn (mut f Flip) connect_children_to_parent() {
+	for mut child in f.commands {
+		child.parent = f
+		child.connect_children_to_parent()
 	}
 }
 
-fn (mut f Flip) impl_init(args []string, command bool, i int) {
-	f.commands = f.commands.filter(!it.name.is_blank())
-	f.flag_parser = FlagParser.new(args)
-	f.args = args
-	if command {
-		f.args = args[args.len % i..]
-	}
-	if f.categories['misc'] == '' {
-		f.categories['misc'] = 'Miscellaneous'
-	}
-	for mut sub in f.commands {
-		if sub.category == '' {
-			sub.category = 'misc'
-		}
-		sub.impl_init(f.args, true, i + 1)
-	}
-}
-
-fn (f Flip) help_helper(prec int) {
-	if prec + 1 <= f.args.len {
-		next_flip := f.get_sub(f.args[prec]) or {
-			f.print_help()
-			return
-		}
-		next_flip.help_helper(prec + 1)
-	} else {
-		f.print_help()
-	}
-}
-
-// init_no_help initializes the given flip with `args`.
-pub fn (mut f Flip) init_no_help(args []string) {
-	f.impl_init(args, false, 1)
-}
-
-// print_help prints help for the flip
-pub fn (f Flip) print_help() {
-	mut buf := ''
-	if !f.description.is_blank() {
-		buf += '${f.description}\n\n'
-	}
-	buf += 'Usage: ${f.name}'
-	if f.usage.is_blank() {
-		cmd := if f.help__initialized { 1 } else { 0 }
-		if f.visible_flags_count() > 0 {
-			buf += ' [flags]'
-		}
-		if f.commands.len > cmd {
-			buf += ' [command]'
-		}
-		if f.takes_args {
-			buf += ' [arguments] ...'
-		}
-	}
-	if !f.usage.is_blank() {
-		usg := 'Usage: '
-		buf += ' ' + f.usage.split('\n').join('\n${get_spaces(usg.len)}')
-	}
-	buf += '\n\n'
-	print(buf)
-	f.print_commands()
-	f.print_flags()
-}
-
-fn (f Flip) visible_flags_count() int {
-	mut i := 0
-	for flag in f.flags {
-		if flag.private && f.name !in flag.private_for {
-			continue
-		}
-		i++
-	}
-	return i
-}
-
-// parse parses the commands from flip.args and then executes the first one that it encounters.
-// Note: The left arguments are reserved for commands and can be accessed inside of it.
+// parse parses the arguments passed to the app by `init`
 pub fn (mut f Flip) parse() ! {
-	f.flag_parser.join_arrays()
-	f.push_fields()
-	f.flags_to_map()
-	f.set_max_length()
-	for mut sub in f.commands {
-		sub.set_max_length()
+	if f.flag_parser.flags.len > 0 {
+		if f.disable_flags {
+			panic('flags were disabled but you declared some')
+		}
+		f.flag_parser.parse(f.args) or { return f.error_handler_safe(err) }
 	}
-	f.exec_commands() or {
-		if err.msg() != '!' {
-			f.error_handler(f, err)!
-			return
+	mut i := 0
+	for flag in f.flag_parser.flags {
+		if flag.idx < 0 {
+			continue
 		}
-		if !f.invoked && isnil(f.execute) && f.help__initialized {
-			f.print_help()
-			return
+		mut count := 1
+		if flag.val_idx >= 0 {
+			count++
 		}
-		if isnil(f.execute) {
-			return
-		}
-		f.execute(f) or {
-			if !isnil(f.error_handler) {
-				f.error_handler(f, err)!
-				return
-			}
-			eprintln(err)
-			exit(err.code())
-			return
-		}
+		f.args.delete_many(flag.idx - i, count)
+		i += count
 	}
-}
-
-fn (mut f Flip) exec_commands() !string {
-	args := f.args
-	for arg in args {
-		for mut sub in f.commands {
-			if sub.name == arg || arg in sub.alias {
-				f.invoked = true
-				sub.exec_commands() or {
-					f.rem_arg(arg)
-					if isnil(sub.execute) {
-						return error('The `execute` field is nil!\nGiven command is not implemented yet. Or it is broken!')
-					}
-					sub.execute(f) or {
-						sub.error_handler(sub, err)!
-						return err
-					}
-					return arg
-				}
+	mut cmd := &Flip{}
+	if !f.force_skip_cmds {
+		cmd = f.find_command(f.args) or { return f.error_handler_safe(err) }
+	} else {
+		$if !skip_cmds ? {
+			if f.commands.len > 0 {
+				eprintln(term.bold('note:') +
+					' by skipping next commands the user will not be able to call commands.\n${' ':6}Set `-d skip_cmds` if you do not want this message.\n')
 			}
 		}
+		cmd = f
 	}
-	return error('!')
+	if isnil(cmd.execute) {
+		if !cmd.is_root {
+			panic('command ${cmd.name} is unimplemented')
+		}
+		f.show_help()
+		return
+	}
+	cmd.execute(f, f.args) or { return f.error_handler_safe(err) }
 }
 
-// exec_command executes a command thats name is `name`.
-// Note: You can also run nested commands with this syntax: `sub1:sub2:sub3`
-pub fn (f Flip) exec_command(name string) ! {
-	names := name.split(':')
-	is_nested := names.len > 1
-	for sub in f.commands {
-		if sub.name == names[0] {
-			if is_nested {
-				sub.exec_command(names[names.len - 1..].join(':'))!
-			}
-			if isnil(sub.execute) {
-				return error('The `execute` field is nil!\nGiven command is not implemented yet. Or it is broken!')
-			}
-			sub.execute(f)!
-			return
+// find_command walks through commands in the path and returns a reference to the last one.
+// If the currently walked command is not valid (doesn't exist), it returns an error
+pub fn (f Flip) find_command(path []string) !&Flip {
+	if path.len <= 0 {
+		return f
+	}
+	for cmd in f.commands {
+		if cmd.name != path[0] {
+			continue
+		}
+		if cmd.force_skip_cmds {
+			return cmd
+		}
+		if path.len >= 1 {
+			return cmd.find_command(path[1..])
 		}
 	}
-	return error('Could not find command "${names[0]}".')
-}
-
-fn (mut f Flip) rem_arg(s string) {
-	mut buf := []string{}
-	for arg in f.args {
-		if arg != s {
-			buf << arg
-		}
+	if f.no_unknown_cmds {
+		return f
 	}
-	f.args = buf
+	return error('unknown command `${path[0]}`')
 }
 
-// add_global_category adds a category for all commands defined in the flip
-pub fn (mut f Flip) add_global_category(key string, title string) {
+fn (f Flip) help_helper(args []string, i int) &Flip {
+	if args.len <= 0 {
+		return f
+	}
+	for cmd in f.commands {
+		if cmd.name != args[i] {
+			continue
+		}
+		if args.len > i + 1 {
+			return cmd.help_helper(args, i + 1)
+		}
+		return cmd
+	}
+	return unsafe { nil }
+}
+
+fn (f Flip) root() &Flip {
+	if f.is_root || isnil(f.parent) {
+		return f
+	}
+	return f.parent.root()
+}
+
+fn (f Flip) error_handler_safe(e IError) ! {
+	if isnil(f.error_handler) {
+		return e
+	}
+	f.error_handler(f, e)!
+}
+
+// set_help_category sets the category of the default help command
+pub fn (mut f Flip) set_help_category(key string) {
+	f.get_category(key)
+	f.find_command(['help']) or { panic('help command not found, try caling this after init') }.category = key
+}
+
+// add_category adds a category to the app to show in help
+pub fn (mut f Flip) add_category(key string, title string) {
+	if key.len <= 0 {
+		panic('category must have a non empty key')
+	}
 	f.categories[key] = title
-	for mut sub in f.commands {
-		sub.add_global_category(key, title)
-	}
 }
 
-// set_global_category adds an already existing category for all commands defined in the flip
-pub fn (mut f Flip) set_global_category(key string) {
-	title := f.categories[key]
-	for mut sub in f.commands {
-		sub.categories[key] = title
-		sub.set_global_category(key)
-	}
-}
-
-fn (mut f Flip) flags_to_map() {
-	mut mapped_flags := map[string]string{}
-	for flag in f.flags {
-		mapped_flags[flag.label] = flag.value
-	}
-	f.mapped_flags = mapped_flags.move()
-}
-
-// args returns a list of arguments with length greater than 0
-pub fn (f Flip) args() ![]string {
-	if f.args.len < 1 {
-		return error('Too few arguments!')
-	}
-	return f.args
-}
-
-// flags returns a map of all flags
-pub fn (f Flip) flags_map() map[string]string {
-	return f.mapped_flags
-}
-
-pub fn (f Flip) flags() []Flag {
-	return f.flags
-}
-
-fn (f Flip) print_flags() {
-	mut buf := ''
-	if f.visible_flags_count() > 0 {
-		buf += 'Flags:\n'
-		for flag in f.flags {
-			if flag.private && f.name !in flag.private_for {
-				continue
-			}
-			buf += flag.parse_info(f) + '\n'
-		}
-		buf += '\n'
-	}
-	print(buf)
-}
-
-fn (f Flip) print_commands() {
-	mut buf := ''
-	subs := f.commands
-	mut sub_names := []string{}
-	for sub in subs {
-		sub_names << sub.name
-	}
-	mut ss := map[string][]string{}
-	for sub in subs {
-		ss[sub.category] << sub.parse_info(f)
-	}
-	for cat, title in f.categories {
-		if !f.commands.category_used(cat) {
-			continue
-		}
-		buf += '* ${title}:\n'
-		for s in ss[cat] {
-			buf += '${s}\n'
-		}
-		buf += '\n'
-	}
-	print(buf)
-}
-
-fn (flag Flag) parse_info(f Flip) string {
-	padding := f.help_padding
-	mut str := '${get_spaces(padding.left)}-${flag.label}'
-	usage := flag.description.split('\n')
-	for i, line in usage {
-		if i != 0 {
-			str += '\n${get_spaces(padding.left + flag.label.len +
-				f.help__max_name_len - flag.label.len + padding.right)}${line}'
-			continue
-		}
-		str += '${get_spaces(f.help__max_name_len - flag.label.len + padding.right - 1)}${line}'
-	}
-	return str
-}
-
-fn (sub Flip) parse_info(f Flip) string {
-	padding := f.help_padding
-	label := if sub.alias.len > 0 { sub.name + ', ' + sub.alias.join(', ') } else { sub.name }
-	mut label_len := label.len
-	mut str := '${get_spaces(padding.left)}${label}'
-	if sub.takes_args {
-		str = '${get_spaces(padding.left)}${label} ...'
-		label_len += 4
-	}
-	desc := sub.description.split('\n')
-	for i, line in desc {
-		if i != 0 {
-			str += '\n${get_spaces(padding.left + f.help__max_name_len + padding.right)}${line}'
-			continue
-		}
-		str += '${get_spaces(f.help__max_name_len - label_len + padding.right)}${line}'
-	}
-	return str
-}
-
-fn (flips []Flip) category_used(s string) bool {
-	for f in flips {
-		if f.category == s {
-			return true
-		}
-	}
-	return false
-}
-
-fn (f Flip) get_sub_names() []string {
-	mut buf := []string{}
-	for sub in f.commands {
-		buf << sub.name
-	}
-	return buf
-}
-
-fn (f Flip) get_sub(name string) ?Flip {
-	for sub in f.commands {
-		if sub.name == name || name in sub.alias {
-			return sub
-		}
-	}
-	return none
-}
-
-fn (mut f Flip) set_max_length() {
-	mut flag_names := []string{}
-	mut sub_names := []string{}
-	flags := f.flags
-	subs := f.commands
-	for flag in flags {
-		flag_names << flag.label
-	}
-	for sub in subs {
-		if sub.takes_args {
-			sub_names << '${sub.name} ...'
-			continue
-		}
-		if sub.alias.len > 0 {
-			sub_names << sub.name + ', ' + sub.alias.join(', ')
-			continue
-		}
-		sub_names << sub.name
-	}
-	a := get_max_length(flag_names)
-	b := get_max_length(sub_names)
-	f.help__max_name_len = max(a, b)
-}
-
-fn get_max_length(ss []string) int {
-	mut lens := []int{}
-	for s in ss {
-		lens << s.len
-	}
-	return max_from_array(lens, 0)
-}
-
-fn max_from_array(i []int, j int) int {
-	mut big := j
-	for x in i {
-		if x > big {
-			big = x
-		}
-	}
-	return big
-}
-
-fn get_spaces(i int) string {
-	return repeat_string(' ', i)
+fn (f Flip) get_category(key string) string {
+	return f.categories[key] or { panic('unknown category with key ${key}') }
 }
