@@ -17,7 +17,7 @@ fn main() {
 fn eval_rpn(equation []string) !int {
 	mut stack := []int{}
 	for expr in equation {
-		if !is_number(expr) {
+		if !is_positive_number(expr) {
 			if stack.len < 2 {
 				return error('too few numbers on the stack')
 			}
@@ -62,6 +62,6 @@ fn eval_rpn(equation []string) !int {
 	return stack.pop()
 }
 
-fn is_number(s string) bool {
+fn is_positive_number(s string) bool {
 	return (s == '0' || s.int() != 0) && s.int() >= 0
 }
