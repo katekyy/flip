@@ -28,7 +28,7 @@ fn eval_rpn(equation []string) !int {
 					stack << first / second
 					continue
 				}
-				'*' {
+				'x' {
 					second := stack.pop()
 					first := stack.pop()
 					stack << first * second
