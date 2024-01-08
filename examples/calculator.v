@@ -10,7 +10,6 @@ fn main() {
 		no_unknown_cmds: true
 	)
 	app.init(os.args)
-	app.bool('test', none, '')
 	app.parse()!
 }
 
