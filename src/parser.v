@@ -30,6 +30,9 @@ pub mut:
 
 @[noinit]
 pub struct FlagParser {
+pub:
+	// Ignores undeclared flags
+	ignore_unknown_flags bool
 mut:
 	idx int = -1
 pub mut:
@@ -38,8 +41,10 @@ pub mut:
 }
 
 // new_flag_parser returns a new instance of the flag parser
-pub fn new_flag_parser() &FlagParser {
-	return &FlagParser{}
+pub fn new_flag_parser(ignore_unknown_flags bool) &FlagParser {
+	return &FlagParser{
+		ignore_unknown_flags: ignore_unknown_flags
+	}
 }
 
 // add_flag desclares a flag for the parser to parse.
@@ -94,7 +99,9 @@ pub fn (mut p FlagParser) parse(args []string) ! {
 					continue root
 				}
 			}
-			return error('unknown flag ${arg[dash_len..]}')
+			if !p.ignore_unknown_flags {
+				return error('unknown flag ${arg[dash_len..]}')
+			}
 		}
 	}
 }

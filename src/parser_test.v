@@ -5,7 +5,7 @@ fn (fp FlagParser) assert_flag_value(key string, val string) bool {
 }
 
 fn test_normal() {
-	mut fp := new_flag_parser()
+	mut fp := new_flag_parser(false)
 	fp.add_flag(.bool, name: 'abc')
 	fp.add_flag(.bool, name: 'bca', short: `b`)
 	fp.add_flag(.float, name: 'f')
