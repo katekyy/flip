@@ -49,7 +49,7 @@ pub fn (f Flip) get_bool_opt(key string) ?bool {
 	if flag.typ == .bool {
 		return flag.value or { return none }.bool()
 	}
-	panic('type of flag ${key} is ${flag.typ}, not bool, therefore it cannot be obtained')
+	panic('type of flag "${key}" is ${flag.typ}, not bool, therefore it cannot be obtained')
 }
 
 // get_string returns the flag with name `key` as a string.
@@ -65,7 +65,7 @@ pub fn (f Flip) get_string_opt(key string) ?string {
 	if flag.typ == .string {
 		return flag.value or { return none }
 	}
-	panic('type of flag ${key} is ${flag.typ}, not string, therefore it cannot be obtained')
+	panic('type of flag "${key}" is ${flag.typ}, not string, therefore it cannot be obtained')
 }
 
 // get_int returns the flag with name `key` as a integer.
@@ -81,7 +81,7 @@ pub fn (f Flip) get_int_opt(key string) ?int {
 	if flag.typ == .int {
 		return flag.value or { return none }.int()
 	}
-	panic('type of flag ${key} is ${flag.typ}, not bool, therefore it cannot be obtained')
+	panic('type of flag "${key}" is ${flag.typ}, not bool, therefore it cannot be obtained')
 }
 
 // get_float returns the flag with name `key` as a 64bit floating point number.
@@ -97,5 +97,5 @@ pub fn (f Flip) get_float_opt(key string) ?f64 {
 	if flag.typ == .float {
 		return flag.value or { return none }.f64()
 	}
-	panic('type of flag ${key} is ${flag.typ}, not bool, therefore it cannot be obtained')
+	panic('type of flag "${key}" is ${flag.typ}, not bool, therefore it cannot be obtained')
 }
