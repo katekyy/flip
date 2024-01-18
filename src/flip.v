@@ -15,7 +15,7 @@ mut:
 	categories  map[string]string
 	parent      &Flip = unsafe { nil }
 	args        []string
-	flag_parser &FlagParser = new_flag_parser()
+	flag_parser &FlagParser = unsafe { nil }
 pub:
 	execute       fn (Flip, []string) ! = unsafe { nil }
 	error_handler fn (Flip, IError) !   = fn (f Flip, e IError) ! {
@@ -29,9 +29,11 @@ pub:
 	disable_help bool
 	// Doesn't look for flags in the args
 	disable_flags bool
-	// If next command was not found, runs the current one with arguments as the unknown command path
-	no_unknown_cmds bool
-	// Skips searching for the next command in the command path (arguments)
+	// Ignores next, not found command path and treats it as arguments
+	ignore_unknown_cmds bool
+	// Ignores undeclared flags and treats them as arguments
+	ignore_unknown_flags bool
+	// Skips searching for the next command in the command path
 	force_skip_cmds bool
 	// Show in help that the command takes options
 	takes_flags bool
@@ -76,17 +78,18 @@ pub fn (mut f Flip) init(args []string) {
 			panic('please specify the app name')
 		}
 	}
-	f.args = if f.include_prog_name { args } else { args[1..] }
 	if !f.disable_help {
 		f.commands << new_command(
 			name: 'help'
 			description: 'Show help for this application.'
 			force_skip_cmds: true
 			execute: fn (f Flip, args []string) ! {
-				f.find_command(args[1..])!.show_help()
+				f.find_command(args)!.show_help()
 			}
 		)
 	}
+	f.args = if f.include_prog_name { args } else { args[1..] }
+	f.flag_parser = new_flag_parser(f.ignore_unknown_flags)
 	f.connect_children_to_parent()
 }
 
@@ -117,14 +120,14 @@ pub fn (mut f Flip) parse() ! {
 		f.args.delete_many(flag.idx - i, count)
 		i += count
 	}
-	mut cmd := &Flip{}
+	mut cmd := &Flip(unsafe { nil })
 	if !f.force_skip_cmds {
 		cmd = f.find_command(f.args) or { return f.error_handler_safe(err) }
 	} else {
 		$if !skip_cmds ? {
 			if f.commands.len > 0 {
 				eprintln(term.bold('note:') +
-					' by skipping next commands the user will not be able to call commands.\n${' ':6}Set `-d skip_cmds` if you do not want this message.\n')
+					' by skipping next commands the user will not be able to call commands.\n${' ':6}Set "-d skip_cmds" if you do not want this message.\n')
 			}
 		}
 		cmd = f
@@ -136,7 +139,9 @@ pub fn (mut f Flip) parse() ! {
 		f.show_help()
 		return
 	}
-	cmd.execute(f, f.args) or { return f.error_handler_safe(err) }
+	cmd.execute(f, if cmd.is_root { f.args } else { f.args[1..] }) or {
+		return f.error_handler_safe(err)
+	}
 }
 
 // find_command walks through commands in the path and returns a reference to the last one.
@@ -156,26 +161,10 @@ pub fn (f Flip) find_command(path []string) !&Flip {
 			return cmd.find_command(path[1..])
 		}
 	}
-	if f.no_unknown_cmds {
+	if f.ignore_unknown_cmds {
 		return f
 	}
-	return error('unknown command `${path[0]}`')
-}
-
-fn (f Flip) help_helper(args []string, i int) &Flip {
-	if args.len <= 0 {
-		return f
-	}
-	for cmd in f.commands {
-		if cmd.name != args[i] {
-			continue
-		}
-		if args.len > i + 1 {
-			return cmd.help_helper(args, i + 1)
-		}
-		return cmd
-	}
-	return unsafe { nil }
+	return error('unknown command "${path[0]}"')
 }
 
 fn (f Flip) root() &Flip {
