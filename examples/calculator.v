@@ -7,7 +7,7 @@ fn main() {
 			println(eval_rpn(args)!)
 		}
 		// Unlike `force_skip_cmds` it just doesn't error out when it can't resolve the command path.
-		no_unknown_cmds: true
+		ignore_unknown_cmds: true
 	)
 	app.init(os.args)
 	app.parse()!

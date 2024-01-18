@@ -8,7 +8,7 @@ fn main() {
 				name: 'joke'
 				description: 'Tell a joke'
 				execute: fn (_ flip.Flip, _ []string) ! {
-					println('There is, unfortunately, no joke to tell...')
+					println("There's unfortunately no joke to tell...")
 				}
 			),
 			flip.new_command(
